@@ -31,6 +31,10 @@
   <h1>💬 Say It Nicely</h1>
   <p class="sub">Type a rough message, get a polished one in your own voice. The AI runs <b>inside your browser</b> (open-weight Gemma / Qwen model): no account, no server, your private messages never leave your device.</p>
 
+  <div class="card" id="mobileNote" hidden style="border:1px solid #f59e0b">
+    ⚠️ <b>You seem to be on a phone.</b> This AI runs on your device's GPU and needs a desktop or laptop with Chrome or Edge. Most phone browsers can't run it. Please open this link on a laptop.
+  </div>
+
   <div class="card">
     <div class="row">
       <div><label for="who">Who is it for?</label>
@@ -109,7 +113,7 @@ async function rewrite(extra) {
 }
 
 $("load").onclick = async () => {
-  if (!("gpu" in navigator)) { $("status").textContent = "This browser has no WebGPU. Please use desktop Chrome or Edge."; return; }
+  if (!("gpu" in navigator)) { $("status").textContent = "This browser cannot run the AI (no WebGPU). Please open this link on a laptop in Chrome or Edge."; return; }
   $("load").disabled = true; $("bar").hidden = false;
   try {
     engine = await CreateMLCEngine($("model").value, {
@@ -126,6 +130,9 @@ $("copy").onclick = async () => {
   catch { $("copy").textContent = "Select text and copy"; }
   setTimeout(() => $("copy").textContent = "Copy", 1500);
 };
+if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || !("gpu" in navigator)) {
+  $("mobileNote").hidden = false;
+}
 setUi();
 </script>
 </body>
