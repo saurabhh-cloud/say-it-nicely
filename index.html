@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Say It Nicely – a private message helper that runs in your browser</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--alt:#334155}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--text)}
+  main{max-width:760px;margin:0 auto;padding:16px}
+  h1{font-size:1.4rem;margin:.2em 0}
+  p.sub{color:var(--muted);margin-top:0}
+  .card{background:var(--card);border-radius:12px;padding:14px;margin-bottom:12px}
+  label{display:block;font-size:.85rem;color:var(--muted);margin:8px 0 2px}
+  input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid #475569;background:#0f172a;color:var(--text);padding:8px 10px;width:100%}
+  button{background:var(--accent);border:0;cursor:pointer;font-weight:600}
+  button.secondary{background:var(--alt)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .actions button{width:auto;flex:1;min-width:140px}
+  #out{white-space:pre-wrap;background:#0f172a;border-radius:10px;padding:12px;min-height:90px}
+  #status{color:var(--muted);font-size:.9rem}
+  progress{width:100%}
+  @media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>💬 Say It Nicely</h1>
+  <p class="sub">Type a rough message, get a polished one in your own voice. The AI runs <b>inside your browser</b> (open-weight Gemma / Qwen model): no account, no server, your private messages never leave your device.</p>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="who">Who is it for?</label>
+        <select id="who"><option>my professor / teacher</option><option>a friend</option><option>my family</option><option>my boss / senior</option><option>someone I don't know well</option></select></div>
+      <div><label for="tone">Tone</label>
+        <select id="tone"><option>polite and respectful</option><option>warm and friendly</option><option>firm but kind</option><option>apologetic</option><option>short and simple</option></select></div>
+    </div>
+    <div class="row">
+      <div><label for="lang">Write it in</label>
+        <select id="lang"><option>English</option><option>Hinglish (Hindi in English letters)</option><option>Hindi</option></select></div>
+      <div><label for="model">Model</label>
+        <select id="model">
+          <option value="gemma-2-2b-it-q4f16_1-MLC-1k" selected>Gemma 2 2B (~1.5 GB, best quality)</option>
+          <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (~1 GB)</option>
+          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (~0.7 GB, fastest)</option>
+        </select></div>
+    </div>
+    <label for="style">About the sender (optional – helps it sound like you)</label>
+    <input id="style" placeholder="e.g. I'm a shy first-year student, I write short simple sentences">
+    <div class="actions"><button id="load">1. Load the AI (first time downloads once, then cached)</button></div>
+    <p id="status">Needs a recent desktop Chrome or Edge (WebGPU).</p>
+    <progress id="bar" value="0" max="1" hidden></progress>
+  </div>
+
+  <div class="card">
+    <label for="rough">Your rough message</label>
+    <textarea id="rough" rows="4" placeholder="e.g. sir i couldnt submit assignment on time because i was sick, can i get few more days"></textarea>
+    <div class="actions">
+      <button id="go" disabled>2. Say it nicely</button>
+      <button id="again" class="secondary" disabled>Try another version</button>
+      <button id="copy" class="secondary" disabled>Copy</button>
+    </div>
+    <label>Result</label>
+    <div id="out">Your polished message will appear here.</div>
+  </div>
+  <p class="sub">Small AI models can make mistakes. Always read the message before you send it.</p>
+</main>
+
+<script type="module">
+import { CreateMLCEngine } from "https://esm.run/@mlc-ai/web-llm@0.2.85";
+const $ = id => document.getElementById(id);
+let engine = null, busy = false;
+
+function systemPrompt() {
+  const about = $("style").value.trim();
+  return `You rewrite rough messages so they sound clear, natural and kind.
+Rules:
+- Keep the exact meaning. NEVER add new facts, excuses, dates or promises the sender did not write.
+- Recipient: ${$("who").value}. Tone: ${$("tone").value}. Language: ${$("lang").value}.
+${about ? "- About the sender: " + about + ". Match this voice.\n" : ""}- Keep it short (under 90 words). Sound like a real person, not a robot.
+- Output ONLY the final message, with no explanation and no quotation marks.`;
+}
+
+function setUi() {
+  const off = busy || !engine;
+  $("go").disabled = off; $("again").disabled = off; $("copy").disabled = !engine || !$("out").dataset.has;
+}
+
+async function rewrite(extra) {
+  const rough = $("rough").value.trim();
+  if (!engine || !rough) { if (!rough) $("out").textContent = "Please type a rough message first."; return; }
+  busy = true; setUi(); $("out").textContent = "…"; delete $("out").dataset.has;
+  try {
+    const stream = await engine.chat.completions.create({
+      messages: [
+        {role: "system", content: systemPrompt()},
+        {role: "user", content: `Rough message:\n${rough}${extra ? "\n\n" + extra : ""}`}
+      ],
+      stream: true, temperature: extra ? 0.9 : 0.6, max_tokens: 250
+    });
+    let full = "";
+    for await (const c of stream) { full += c.choices[0]?.delta?.content || ""; $("out").textContent = full; }
+    $("out").dataset.has = "1";
+  } catch (e) { $("out").textContent = "Sorry, something went wrong: " + e.message; }
+  busy = false; setUi();
+}
+
+$("load").onclick = async () => {
+  if (!("gpu" in navigator)) { $("status").textContent = "This browser has no WebGPU. Please use desktop Chrome or Edge."; return; }
+  $("load").disabled = true; $("bar").hidden = false;
+  try {
+    engine = await CreateMLCEngine($("model").value, {
+      initProgressCallback: p => { $("bar").value = p.progress; $("status").textContent = p.text; }
+    });
+    $("status").textContent = "Ready ✅ – now works even offline.";
+    $("bar").hidden = true; setUi();
+  } catch (e) { $("status").textContent = "Could not load model: " + e.message; $("load").disabled = false; }
+};
+$("go").onclick = () => rewrite("");
+$("again").onclick = () => rewrite("Write a different version with different wording.");
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("out").textContent); $("copy").textContent = "Copied ✓"; }
+  catch { $("copy").textContent = "Select text and copy"; }
+  setTimeout(() => $("copy").textContent = "Copy", 1500);
+};
+setUi();
+</script>
+</body>
+</html>
